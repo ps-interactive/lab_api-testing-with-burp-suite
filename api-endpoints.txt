@@ -1,0 +1,38 @@
+# API Endpoints for Testing
+
+## Authentication Endpoints
+POST /api/login
+- Body: {"username": "string", "password": "string"}
+- Returns: JWT token and user info
+
+## User Management
+GET /api/users/{user_id}
+- Returns: User information for specified ID
+
+GET /api/admin/users
+- Headers: X-API-Key
+- Returns: List of all users (admin only)
+
+## Product Catalog
+GET /api/products
+- Query params: category, price_filter
+- Returns: List of products
+
+## Utility Endpoints
+POST /api/password-reset
+- Body: {"email": "string"}
+- Returns: Confirmation message
+
+POST /api/upload
+- Form data: file upload
+- Returns: Upload confirmation
+
+## Test Credentials
+Username: admin, Password: admin123
+Username: user1, Password: password123
+Username: testuser, Password: test123
+
+## API Keys
+Admin: admin_key_12345
+User: user_key_67890
+Test: test_key_54321
