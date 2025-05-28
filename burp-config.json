@@ -1,0 +1,25 @@
+{
+  "target_scope": {
+    "include": [
+      {"protocol": "http", "host": "localhost", "port": 8080}
+    ]
+  },
+  "proxy_settings": {
+    "port": 8080,
+    "interface": "127.0.0.1"
+  },
+  "intruder_payloads": {
+    "sql_injection": [
+      "' OR '1'='1",
+      "admin'--",
+      "' UNION SELECT 1,2,3,4,5--",
+      "'; DROP TABLE users;--"
+    ],
+    "common_passwords": [
+      "admin",
+      "password",
+      "123456",
+      "admin123"
+    ]
+  }
+}
