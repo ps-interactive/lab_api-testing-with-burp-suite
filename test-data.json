@@ -1,0 +1,38 @@
+{
+  "valid_users": [
+    {"username": "admin", "password": "admin123"},
+    {"username": "user1", "password": "password123"},
+    {"username": "testuser", "password": "test123"}
+  ],
+  "sql_injection_payloads": [
+    "' OR '1'='1",
+    "admin'--",
+    "' UNION SELECT null,username,password,null,null FROM users--",
+    "'; DROP TABLE users;--"
+  ],
+  "api_keys": [
+    "admin_key_12345",
+    "user_key_67890",
+    "test_key_54321",
+    "invalid_key",
+    "short"
+  ],
+  "product_categories": [
+    "Electronics",
+    "Electronics' OR '1'='1",
+    "Books",
+    "Clothing"
+  ],
+  "price_filters": [
+    "> 500",
+    "< 1000",
+    "= 999.99",
+    "> 0 OR 1=1"
+  ],
+  "file_uploads": [
+    "test.txt",
+    "malicious.php",
+    "script.js",
+    "../../../etc/passwd"
+  ]
+}
