@@ -1,1 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API Login Test</title>
+</head>
+<body>
+    <h2>API Login Test</h2>
+    
+    <h3>Normal Login Test</h3>
+    <button onclick="testNormalLogin()">Test Normal Login</button>
+    <div id="result1"></div>
+    
+    <h3>SQL Injection Test</h3>
+    <button onclick="testSQLInjection()">Test SQL Injection</button>
+    <div id="result2"></div>
 
+    <script>
+    function testNormalLogin() {
+        fetch('http://localhost:8080/api/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username: 'testuser',
+                password: 'wrongpassword'
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('result1').innerHTML = JSON.stringify(data);
+        })
+        .catch(error => {
+            document.getElementById('result1').innerHTML = 'Error: ' + error;
+        });
+    }
+    
+    function testSQLInjection() {
+        fetch('http://localhost:8080/api/login', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                username: "admin' OR '1'='1'--",
+                password: 'anything'
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('result2').innerHTML = JSON.stringify(data);
+        })
+        .catch(error => {
+            document.getElementById('result2').innerHTML = 'Error: ' + error;
+        });
+    }
+    </script>
+</body>
+</html>
