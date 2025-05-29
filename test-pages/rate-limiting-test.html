@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Rate Limiting Test</title>
+</head>
+<body>
+    <h2>Rate Limiting and Business Logic Test</h2>
+    
+    <button onclick="testPasswordReset()">Single Password Reset</button>
+    <button onclick="testRateLimiting()">Test Rate Limiting (20 requests)</button>
+    <button onclick="testAPIKey()">Test API Key Bypass</button>
+    
+    <div id="results"></div>
+
+    <script>
+    function testPasswordReset() {
+        fetch('http://localhost:8080/api/password-reset', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                email: 'test@example.com'
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML = 
+                '<h3>Password Reset Result:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        });
+    }
+    
+    function testRateLimiting() {
+        document.getElementById('results').innerHTML = '<h3>Sending 20 rapid requests...</h3>';
+        let startTime = Date.now();
+        
+        for(let i = 1; i <= 20; i++) {
+            fetch('http://localhost:8080/api/password-reset', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    email: 'test' + i + '@example.com'
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if(i === 20) {
+                    let endTime = Date.now();
+                    document.getElementById('results').innerHTML += 
+                        '<p>All 20 requests completed in ' + (endTime - startTime) + 'ms</p>' +
+                        '<p>Last response: ' + JSON.stringify(data) + '</p>';
+                }
+            });
+        }
+    }
+    
+    function testAPIKey() {
+        fetch('http://localhost:8080/api/admin/users', {
+            method: 'GET',
+            headers: {
+                'X-API-Key': 'this_is_long_enough_12345'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML = 
+                '<h3>API Key Bypass Result:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        });
+    }
+    </script>
+</body>
+</html>
