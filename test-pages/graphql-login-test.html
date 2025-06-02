@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GraphQL Authentication Test</title>
+</head>
+<body>
+    <h2>GraphQL Authentication Testing</h2>
+    
+    <h3>Normal Login Test</h3>
+    <button onclick="testNormalLogin()">Test Normal GraphQL Login</button>
+    <div id="result1"></div>
+    
+    <h3>SQL Injection Test</h3>
+    <button onclick="testSQLInjection()">Test GraphQL SQL Injection</button>
+    <div id="result2"></div>
+
+    <script>
+    function testNormalLogin() {
+        const query = `
+            mutation {
+                login(username: "testuser", password: "wrongpassword") {
+                    success
+                    message
+                    token
+                    user {
+                        id
+                        username
+                        role
+                    }
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('result1').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        })
+        .catch(error => {
+            document.getElementById('result1').innerHTML = 'Error: ' + error;
+        });
+    }
+    
+    function testSQLInjection() {
+        const query = `
+            mutation {
+                login(username: "admin' OR '1'='1'--", password: "anything") {
+                    success
+                    message
+                    token
+                    user {
+                        id
+                        username
+                        role
+                    }
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('result2').innerHTML = '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        })
+        .catch(error => {
+            document.getElementById('result2').innerHTML = 'Error: ' + error;
+        });
+    }
+    </script>
+</body>
+</html>
