@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """
-Vulnerable GraphQL API for Burp Suite Testing Lab
-Simulates common GraphQL vulnerabilities for educational purposes
 """
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import sqlite3
-import hashlib
 import jwt
 import datetime
 import json
-import graphene
-from graphene import ObjectType, String, Int, Float, List, Field, Mutation, Schema, Argument
-from flask_graphql import GraphQLView
+import re
 
 app = Flask(__name__)
 app.secret_key = 'weak_secret_key_123'
@@ -62,7 +57,7 @@ def init_db():
         )
     ''')
     
-    # Insert sample data with sensitive information
+    # Insert sample data
     cursor.execute("INSERT OR IGNORE INTO users VALUES (1, 'admin', 'admin123', 'admin@company.com', 'admin', 'admin_key_12345', 'Admin has access to all systems')")
     cursor.execute("INSERT OR IGNORE INTO users VALUES (2, 'user1', 'password123', 'user1@company.com', 'user', 'user_key_67890', 'Regular user account')")
     cursor.execute("INSERT OR IGNORE INTO users VALUES (3, 'testuser', 'test123', 'test@company.com', 'user', 'test_key_54321', 'Test account for demos')")
@@ -79,303 +74,314 @@ def init_db():
     conn.commit()
     conn.close()
 
-# GraphQL Type Definitions
-class UserType(ObjectType):
-    id = Int()
-    username = String()
-    email = String()
-    role = String()
-    secret_notes = String()  # Sensitive field that should be restricted
-
-class ProductType(ObjectType):
-    id = Int()
-    name = String()
-    price = Float()
-    description = String()
-    category = String()
-    internal_notes = String()  # Sensitive field that should be restricted
-
-class OrderType(ObjectType):
-    id = Int()
-    user_id = Int()
-    product_id = Int()
-    quantity = Int()
-    total_price = Float()
-    status = String()
-    admin_notes = String()  # Sensitive field that should be restricted
-
-class AuthPayload(ObjectType):
-    success = String()
-    token = String()
-    user = Field(UserType)
-    message = String()
-
-# GraphQL Queries
-class Query(ObjectType):
-    # Vulnerable user query - susceptible to SQL injection and IDOR
-    user = Field(UserType, id=Argument(Int), username=Argument(String))
+def parse_graphql_query(query_string):
+    """Simple GraphQL query parser - vulnerable to injection"""
+    # Remove extra whitespace and newlines
+    query = re.sub(r'\s+', ' ', query_string.strip())
     
-    # Vulnerable users query - should require admin auth but doesn't
-    users = List(UserType, limit=Argument(Int, default_value=10))
+    # Extract query type (query or mutation)
+    if query.startswith('mutation'):
+        query_type = 'mutation'
+        query = query[8:].strip()
+    else:
+        query_type = 'query'
+        if query.startswith('query'):
+            query = query[5:].strip()
     
-    # Vulnerable product search - susceptible to injection
-    products = List(ProductType, category=Argument(String), search=Argument(String))
-    
-    # Product by ID - basic IDOR vulnerability
-    product = Field(ProductType, id=Argument(Int, required=True))
-    
-    # Orders query - should check authorization but doesn't
-    orders = List(OrderType, user_id=Argument(Int))
-    
-    # Schema introspection - should be disabled in production
-    introspection_enabled = String()
+    return query_type, query
 
-    def resolve_user(self, info, id=None, username=None):
-        conn = sqlite3.connect('vulnerable_graphql.db')
-        cursor = conn.cursor()
+def execute_user_query(query, variables=None):
+    """Execute user-related GraphQL queries - vulnerable to SQL injection"""
+    conn = sqlite3.connect('vulnerable_graphql.db')
+    cursor = conn.cursor()
+    
+    # Parse user ID from query (vulnerable parsing)
+    if 'user(' in query:
+        # Extract id parameter - vulnerable to injection
+        id_match = re.search(r'id:\s*(\d+|[^,}]+)', query)
+        if id_match:
+            user_id = id_match.group(1)
+            # Vulnerable SQL query
+            sql_query = f"SELECT * FROM users WHERE id = {user_id}"
+            try:
+                cursor.execute(sql_query)
+                user_data = cursor.fetchone()
+                if user_data:
+                    return {
+                        "data": {
+                            "user": {
+                                "id": user_data[0],
+                                "username": user_data[1],
+                                "email": user_data[3],
+                                "role": user_data[4],
+                                "secretNotes": user_data[6]
+                            }
+                        }
+                    }
+            except Exception as e:
+                return {"errors": [{"message": str(e)}]}
+    
+    # Parse username parameter - also vulnerable
+    if 'username:' in query:
+        username_match = re.search(r'username:\s*"([^"]*)"', query)
+        if username_match:
+            username = username_match.group(1)
+            # Vulnerable SQL query
+            sql_query = f"SELECT * FROM users WHERE username = '{username}'"
+            try:
+                cursor.execute(sql_query)
+                user_data = cursor.fetchone()
+                if user_data:
+                    return {
+                        "data": {
+                            "user": {
+                                "id": user_data[0],
+                                "username": user_data[1],
+                                "email": user_data[3],
+                                "role": user_data[4],
+                                "secretNotes": user_data[6]
+                            }
+                        }
+                    }
+            except Exception as e:
+                return {"errors": [{"message": str(e)}]}
+    
+    # Handle users query (list all users)
+    if 'users' in query and 'user(' not in query:
+        # Extract limit if present
+        limit = 10
+        limit_match = re.search(r'limit:\s*(\d+)', query)
+        if limit_match:
+            limit = int(limit_match.group(1))
         
-        if id:
-            # Vulnerable to SQL injection
-            query = f"SELECT * FROM users WHERE id = {id}"
-            cursor.execute(query)
-        elif username:
-            # Also vulnerable to SQL injection
-            query = f"SELECT * FROM users WHERE username = '{username}'"
-            cursor.execute(query)
+        # Vulnerable query with limit injection
+        sql_query = f"SELECT * FROM users LIMIT {limit}"
+        try:
+            cursor.execute(sql_query)
+            users_data = cursor.fetchall()
+            users = []
+            for user in users_data:
+                users.append({
+                    "id": user[0],
+                    "username": user[1],
+                    "email": user[3],
+                    "role": user[4],
+                    "secretNotes": user[6]
+                })
+            return {"data": {"users": users}}
+        except Exception as e:
+            return {"errors": [{"message": str(e)}]}
+    
+    conn.close()
+    return {"data": None}
+
+def execute_product_query(query):
+    """Execute product-related GraphQL queries - vulnerable to injection"""
+    conn = sqlite3.connect('vulnerable_graphql.db')
+    cursor = conn.cursor()
+    
+    if 'products' in query:
+        # Extract category parameter - vulnerable to injection
+        category_match = re.search(r'category:\s*"([^"]*)"', query)
+        search_match = re.search(r'search:\s*"([^"]*)"', query)
+        
+        if category_match and search_match:
+            category = category_match.group(1)
+            search = search_match.group(1)
+            # Vulnerable union injection point
+            sql_query = f"SELECT * FROM products WHERE category = '{category}' AND name LIKE '%{search}%'"
+        elif category_match:
+            category = category_match.group(1)
+            sql_query = f"SELECT * FROM products WHERE category = '{category}'"
+        elif search_match:
+            search = search_match.group(1)
+            sql_query = f"SELECT * FROM products WHERE name LIKE '%{search}%'"
         else:
-            return None
-            
-        user_data = cursor.fetchone()
-        conn.close()
+            sql_query = "SELECT * FROM products"
         
-        if user_data:
-            return UserType(
-                id=user_data[0],
-                username=user_data[1],
-                email=user_data[3],
-                role=user_data[4],
-                secret_notes=user_data[6]  # Leaking sensitive data
-            )
-        return None
-
-    def resolve_users(self, info, limit):
-        # No authentication check - IDOR vulnerability
-        conn = sqlite3.connect('vulnerable_graphql.db')
-        cursor = conn.cursor()
-        
-        # Vulnerable to injection through limit parameter
-        query = f"SELECT * FROM users LIMIT {limit}"
-        cursor.execute(query)
-        users_data = cursor.fetchall()
-        conn.close()
-        
-        return [
-            UserType(
-                id=user[0],
-                username=user[1],
-                email=user[3],
-                role=user[4],
-                secret_notes=user[6]
-            ) for user in users_data
-        ]
-
-    def resolve_products(self, info, category=None, search=None):
-        conn = sqlite3.connect('vulnerable_graphql.db')
-        cursor = conn.cursor()
-        
-        if category and search:
-            # Vulnerable to union-based injection
-            query = f"SELECT * FROM products WHERE category = '{category}' AND name LIKE '%{search}%'"
-            cursor.execute(query)
-        elif category:
-            query = f"SELECT * FROM products WHERE category = '{category}'"
-            cursor.execute(query)
-        elif search:
-            query = f"SELECT * FROM products WHERE name LIKE '%{search}%'"
-            cursor.execute(query)
-        else:
-            cursor.execute("SELECT * FROM products")
-            
-        products_data = cursor.fetchall()
-        conn.close()
-        
-        return [
-            ProductType(
-                id=product[0],
-                name=product[1],
-                price=product[2],
-                description=product[3],
-                category=product[4],
-                internal_notes=product[5]
-            ) for product in products_data
-        ]
-
-    def resolve_product(self, info, id):
-        # Basic IDOR - no authorization check
-        conn = sqlite3.connect('vulnerable_graphql.db')
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM products WHERE id = ?", (id,))
-        product_data = cursor.fetchone()
-        conn.close()
-        
-        if product_data:
-            return ProductType(
-                id=product_data[0],
-                name=product_data[1],
-                price=product_data[2],
-                description=product_data[3],
-                category=product_data[4],
-                internal_notes=product_data[5]
-            )
-        return None
-
-    def resolve_orders(self, info, user_id=None):
-        # No authorization check - can view any user's orders
-        conn = sqlite3.connect('vulnerable_graphql.db')
-        cursor = conn.cursor()
-        
-        if user_id:
-            # Vulnerable to injection
-            query = f"SELECT * FROM orders WHERE user_id = {user_id}"
-            cursor.execute(query)
-        else:
-            cursor.execute("SELECT * FROM orders")
-            
-        orders_data = cursor.fetchall()
-        conn.close()
-        
-        return [
-            OrderType(
-                id=order[0],
-                user_id=order[1],
-                product_id=order[2],
-                quantity=order[3],
-                total_price=order[4],
-                status=order[5],
-                admin_notes=order[6]
-            ) for order in orders_data
-        ]
-
-    def resolve_introspection_enabled(self, info):
-        return "GraphQL introspection is enabled - this should be disabled in production!"
-
-# GraphQL Mutations
-class LoginMutation(Mutation):
-    class Arguments:
-        username = String(required=True)
-        password = String(required=True)
+        try:
+            cursor.execute(sql_query)
+            products_data = cursor.fetchall()
+            products = []
+            for product in products_data:
+                products.append({
+                    "id": product[0],
+                    "name": product[1],
+                    "price": product[2],
+                    "description": product[3],
+                    "category": product[4],
+                    "internalNotes": product[5]
+                })
+            return {"data": {"products": products}}
+        except Exception as e:
+            return {"errors": [{"message": str(e)}]}
     
-    Output = AuthPayload
+    conn.close()
+    return {"data": None}
+
+def execute_login_mutation(query):
+    """Execute login mutation - vulnerable to SQL injection"""
+    conn = sqlite3.connect('vulnerable_graphql.db')
+    cursor = conn.cursor()
     
-    def mutate(self, info, username, password):
-        conn = sqlite3.connect('vulnerable_graphql.db')
-        cursor = conn.cursor()
+    # Extract username and password from mutation
+    username_match = re.search(r'username:\s*"([^"]*)"', query)
+    password_match = re.search(r'password:\s*"([^"]*)"', query)
+    
+    if username_match and password_match:
+        username = username_match.group(1)
+        password = password_match.group(1)
         
         # Vulnerable SQL injection in authentication
-        query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
-        cursor.execute(query)
-        user = cursor.fetchone()
-        
-        if user:
-            token = jwt.encode({
-                'user_id': user[0],
-                'username': user[1],
-                'role': user[4],
-                'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
-            }, app.secret_key, algorithm='HS256')
+        sql_query = f"SELECT * FROM users WHERE username = '{username}' AND password = '{password}'"
+        try:
+            cursor.execute(sql_query)
+            user = cursor.fetchone()
             
-            return AuthPayload(
-                success="true",
-                token=token,
-                user=UserType(
-                    id=user[0],
-                    username=user[1],
-                    email=user[3],
-                    role=user[4]
-                ),
-                message="Authentication successful"
-            )
-        
-        return AuthPayload(
-            success="false",
-            message="Invalid credentials",
-            token=None,
-            user=None
-        )
+            if user:
+                token = jwt.encode({
+                    'user_id': user[0],
+                    'username': user[1],
+                    'role': user[4],
+                    'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=1)
+                }, app.secret_key, algorithm='HS256')
+                
+                return {
+                    "data": {
+                        "login": {
+                            "success": "true",
+                            "token": token,
+                            "user": {
+                                "id": user[0],
+                                "username": user[1],
+                                "role": user[4]
+                            },
+                            "message": "Authentication successful"
+                        }
+                    }
+                }
+            else:
+                return {
+                    "data": {
+                        "login": {
+                            "success": "false",
+                            "message": "Invalid credentials",
+                            "token": None,
+                            "user": None
+                        }
+                    }
+                }
+        except Exception as e:
+            return {"errors": [{"message": str(e)}]}
+    
+    conn.close()
+    return {"errors": [{"message": "Invalid mutation format"}]}
 
-class UpdateUserMutation(Mutation):
-    class Arguments:
-        id = Int(required=True)
-        email = String()
-        role = String()
-    
-    Output = UserType
-    
-    def mutate(self, info, id, email=None, role=None):
-        # No authorization check - IDOR vulnerability
-        conn = sqlite3.connect('vulnerable_graphql.db')
-        cursor = conn.cursor()
-        
-        if email and role:
-            # Vulnerable to injection
-            query = f"UPDATE users SET email = '{email}', role = '{role}' WHERE id = {id}"
-            cursor.execute(query)
-        elif email:
-            query = f"UPDATE users SET email = '{email}' WHERE id = {id}"
-            cursor.execute(query)
-        elif role:
-            query = f"UPDATE users SET role = '{role}' WHERE id = {id}"
-            cursor.execute(query)
+# Simple GraphQL endpoint
+@app.route('/graphql', methods=['GET', 'POST'])
+def graphql():
+    if request.method == 'GET':
+        # Return GraphiQL interface
+        return '''
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>GraphiQL</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .container { display: flex; height: 80vh; }
+                .query-section { flex: 1; margin-right: 10px; }
+                .result-section { flex: 1; margin-left: 10px; }
+                textarea { width: 100%; height: 300px; font-family: monospace; }
+                button { padding: 10px 20px; background: #007cba; color: white; border: none; cursor: pointer; }
+                .result { background: #f5f5f5; padding: 10px; height: 300px; overflow: auto; font-family: monospace; white-space: pre-wrap; }
+                .example { background: #e8f4fd; padding: 10px; margin: 10px 0; border-left: 4px solid #007cba; }
+            </style>
+        </head>
+        <body>
+            <h1>GraphQL Testing Interface</h1>
+            <div class="example">
+                <strong>Example Queries:</strong><br>
+                Query: { users { id username email role secretNotes } }<br>
+                Mutation: mutation { login(username: "admin", password: "admin123") { success token user { username role } } }<br>
+                Injection: { user(username: "admin' OR '1'='1'--") { id username role } }
+            </div>
+            <div class="container">
+                <div class="query-section">
+                    <h3>GraphQL Query</h3>
+                    <textarea id="query" placeholder="Enter your GraphQL query here...">{ users { id username email role } }</textarea>
+                    <br><br>
+                    <button onclick="executeQuery()">Execute Query</button>
+                </div>
+                <div class="result-section">
+                    <h3>Result</h3>
+                    <div id="result" class="result">Results will appear here...</div>
+                </div>
+            </div>
             
-        conn.commit()
+            <script>
+            function executeQuery() {
+                const query = document.getElementById('query').value;
+                
+                fetch('/graphql', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ query: query })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+                })
+                .catch(error => {
+                    document.getElementById('result').textContent = 'Error: ' + error;
+                });
+            }
+            </script>
+        </body>
+        </html>
+        '''
+    
+    elif request.method == 'POST':
+        data = request.get_json()
+        query = data.get('query', '')
+        variables = data.get('variables', {})
         
-        # Return updated user
-        cursor.execute(f"SELECT * FROM users WHERE id = {id}")
-        user_data = cursor.fetchone()
-        conn.close()
+        # Parse and execute GraphQL query
+        query_type, parsed_query = parse_graphql_query(query)
         
-        if user_data:
-            return UserType(
-                id=user_data[0],
-                username=user_data[1],
-                email=user_data[3],
-                role=user_data[4],
-                secret_notes=user_data[6]
-            )
-        return None
+        if query_type == 'mutation':
+            if 'login' in parsed_query:
+                return jsonify(execute_login_mutation(parsed_query))
+        else:
+            # Handle queries
+            if 'user' in parsed_query:
+                return jsonify(execute_user_query(parsed_query, variables))
+            elif 'products' in parsed_query:
+                return jsonify(execute_product_query(parsed_query))
+            elif 'introspectionEnabled' in parsed_query:
+                return jsonify({"data": {"introspectionEnabled": "GraphQL introspection is enabled - this should be disabled in production!"}})
+        
+        return jsonify({"data": None})
 
-class Mutations(ObjectType):
-    login = LoginMutation.Field()
-    update_user = UpdateUserMutation.Field()
-
-# Create GraphQL Schema
-schema = Schema(query=Query, mutation=Mutations)
-
-# Add GraphQL endpoint
-app.add_url_rule(
-    '/graphql',
-    view_func=GraphQLView.as_view('graphql', schema=schema, graphiql=True)
-)
-
-# Simple endpoint to check if API is running
+# Health check endpoint
 @app.route('/health')
-def health_check():
+def health():
     return jsonify({'status': 'GraphQL API is running', 'endpoint': '/graphql'})
 
-# Rate limiting test endpoint (still needed for business logic testing)
+# Rate limiting test endpoint (for Challenge 3)
 @app.route('/api/password-reset', methods=['POST'])
 def password_reset():
     data = request.get_json()
     email = data.get('email', '')
-    # No rate limiting implemented
     return jsonify({'message': f'Password reset link sent to {email}'}), 200
 
-# API key test endpoint
+# API key test endpoint (for Challenge 3)
 @app.route('/api/admin/users', methods=['GET'])
 def admin_get_users():
     api_key = request.headers.get('X-API-Key')
     
-    # Weak API key validation
     if not api_key or len(api_key) < 10:
         return jsonify({'error': 'Invalid API key'}), 401
     
