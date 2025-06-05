@@ -74,8 +74,51 @@ def init_db():
     conn.commit()
     conn.close()
 
+def get_user_orders(user_id):
+    """Get orders for a specific user"""
+    conn = sqlite3.connect('vulnerable_graphql.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM orders WHERE user_id = ?", (user_id,))
+    orders_data = cursor.fetchall()
+    conn.close()
+    
+    orders = []
+    for order in orders_data:
+        # Get product info for each order
+        product = get_product_by_id(order[2])
+        orders.append({
+            "id": order[0],
+            "userId": order[1],
+            "productId": order[2],
+            "quantity": order[3],
+            "totalPrice": order[4],
+            "status": order[5],
+            "adminNotes": order[6],
+            "product": product
+        })
+    return orders
+
+def get_product_by_id(product_id):
+    """Get product by ID"""
+    conn = sqlite3.connect('vulnerable_graphql.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,))
+    product_data = cursor.fetchone()
+    conn.close()
+    
+    if product_data:
+        return {
+            "id": product_data[0],
+            "name": product_data[1],
+            "price": product_data[2],
+            "description": product_data[3],
+            "category": product_data[4],
+            "internalNotes": product_data[5]
+        }
+    return None
+
 def parse_graphql_query(query_string):
-    """Simple GraphQL query parser - vulnerable to injection"""
+    """Enhanced GraphQL query parser"""
     # Remove extra whitespace and newlines
     query = re.sub(r'\s+', ' ', query_string.strip())
     
@@ -90,64 +133,69 @@ def parse_graphql_query(query_string):
     
     return query_type, query
 
+def extract_fields(query, entity):
+    """Extract requested fields for an entity"""
+    # Find the entity block
+    pattern = rf'{entity}\s*{{([^}}]+)}}'
+    match = re.search(pattern, query)
+    
+    if match:
+        fields_str = match.group(1)
+        # Simple field extraction - split by spaces/commas and clean
+        fields = []
+        for field in re.split(r'[,\s]+', fields_str):
+            field = field.strip()
+            if field and not field.startswith('{') and not field.endswith('}'):
+                fields.append(field)
+        return fields
+    return []
+
+def check_for_nested_queries(query):
+    """Check if query contains nested structure"""
+    return 'orders(' in query or 'product{' in query
+
 def execute_user_query(query, variables=None):
-    """Execute user-related GraphQL queries - vulnerable to SQL injection"""
+    """Execute user-related GraphQL queries with enhanced parsing"""
     conn = sqlite3.connect('vulnerable_graphql.db')
     cursor = conn.cursor()
     
+    # Check if this is a nested query with orders
+    has_nested_orders = 'orders(' in query
+    has_nested_products = 'product{' in query
+    
     # Parse user ID from query (vulnerable parsing)
-    if 'user(' in query:
-        # Extract id parameter - vulnerable to injection
+    if 'user(' in query and 'users{' not in query:
+        # Single user query
         id_match = re.search(r'id:\s*(\d+|[^,}]+)', query)
+        username_match = re.search(r'username:\s*"([^"]*)"', query)
+        
         if id_match:
             user_id = id_match.group(1)
             # Vulnerable SQL query
             sql_query = f"SELECT * FROM users WHERE id = {user_id}"
-            try:
-                cursor.execute(sql_query)
-                user_data = cursor.fetchone()
-                if user_data:
-                    return {
-                        "data": {
-                            "user": {
-                                "id": user_data[0],
-                                "username": user_data[1],
-                                "email": user_data[3],
-                                "role": user_data[4],
-                                "secretNotes": user_data[6]
-                            }
-                        }
-                    }
-            except Exception as e:
-                return {"errors": [{"message": str(e)}]}
-    
-    # Parse username parameter - also vulnerable
-    if 'username:' in query:
-        username_match = re.search(r'username:\s*"([^"]*)"', query)
-        if username_match:
+        elif username_match:
             username = username_match.group(1)
-            # Vulnerable SQL query
             sql_query = f"SELECT * FROM users WHERE username = '{username}'"
-            try:
-                cursor.execute(sql_query)
-                user_data = cursor.fetchone()
-                if user_data:
-                    return {
-                        "data": {
-                            "user": {
-                                "id": user_data[0],
-                                "username": user_data[1],
-                                "email": user_data[3],
-                                "role": user_data[4],
-                                "secretNotes": user_data[6]
-                            }
-                        }
-                    }
-            except Exception as e:
-                return {"errors": [{"message": str(e)}]}
+        else:
+            return {"data": {"user": None}}
+            
+        try:
+            cursor.execute(sql_query)
+            user_data = cursor.fetchone()
+            if user_data:
+                user_obj = {
+                    "id": user_data[0],
+                    "username": user_data[1],
+                    "email": user_data[3],
+                    "role": user_data[4],
+                    "secretNotes": user_data[6]
+                }
+                return {"data": {"user": user_obj}}
+        except Exception as e:
+            return {"errors": [{"message": str(e)}]}
     
-    # Handle users query (list all users)
-    if 'users' in query and 'user(' not in query:
+    # Multiple users query
+    elif 'users{' in query:
         # Extract limit if present
         limit = 10
         limit_match = re.search(r'limit:\s*(\d+)', query)
@@ -160,14 +208,34 @@ def execute_user_query(query, variables=None):
             cursor.execute(sql_query)
             users_data = cursor.fetchall()
             users = []
+            
             for user in users_data:
-                users.append({
+                user_obj = {
                     "id": user[0],
                     "username": user[1],
                     "email": user[3],
                     "role": user[4],
                     "secretNotes": user[6]
-                })
+                }
+                
+                # Add nested orders if requested
+                if has_nested_orders:
+                    user_orders = get_user_orders(user[0])
+                    
+                    # If query has deeply nested structure, add recursive orders
+                    if has_nested_products and 'orders(userId:1){id product{id name orders(userId:1)' in query:
+                        # Add recursive nesting for complexity attack simulation
+                        for order in user_orders:
+                            if order['product']:
+                                order['product']['orders'] = get_user_orders(1)  # Recursive orders
+                                for nested_order in order['product']['orders']:
+                                    if nested_order['product']:
+                                        nested_order['product']['orders'] = get_user_orders(1)
+                    
+                    user_obj["orders"] = user_orders
+                
+                users.append(user_obj)
+            
             return {"data": {"users": users}}
         except Exception as e:
             return {"errors": [{"message": str(e)}]}
@@ -218,6 +286,89 @@ def execute_product_query(query):
     
     conn.close()
     return {"data": None}
+
+def execute_orders_query(query):
+    """Execute orders-related GraphQL queries"""
+    conn = sqlite3.connect('vulnerable_graphql.db')
+    cursor = conn.cursor()
+    
+    if 'orders{' in query:
+        # Extract userId if present
+        user_id_match = re.search(r'userId:\s*(\d+)', query)
+        
+        if user_id_match:
+            user_id = user_id_match.group(1)
+            sql_query = f"SELECT * FROM orders WHERE user_id = {user_id}"
+        else:
+            sql_query = "SELECT * FROM orders"
+        
+        try:
+            cursor.execute(sql_query)
+            orders_data = cursor.fetchall()
+            orders = []
+            
+            for order in orders_data:
+                order_obj = {
+                    "id": order[0],
+                    "userId": order[1],
+                    "productId": order[2],
+                    "quantity": order[3],
+                    "totalPrice": order[4],
+                    "status": order[5],
+                    "adminNotes": order[6]
+                }
+                orders.append(order_obj)
+            
+            return {"data": {"orders": orders}}
+        except Exception as e:
+            return {"errors": [{"message": str(e)}]}
+    
+    conn.close()
+    return {"data": None}
+
+def execute_batch_query(query):
+    """Handle batch queries (query1, query2, etc.)"""
+    if 'query1:' in query or 'query2:' in query:
+        results = {}
+        
+        # Extract individual queries
+        for i in range(1, 6):  # Support up to 5 batch queries
+            pattern = rf'query{i}:\s*(\w+)\s*{{([^}}]+)}}'
+            match = re.search(pattern, query)
+            
+            if match:
+                entity = match.group(1)
+                fields = match.group(2)
+                
+                if entity == 'users':
+                    # Execute simple users query for each batch
+                    conn = sqlite3.connect('vulnerable_graphql.db')
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT * FROM users LIMIT 5")
+                    users_data = cursor.fetchall()
+                    
+                    users = []
+                    for user in users_data:
+                        user_obj = {}
+                        # Only include requested fields
+                        if 'id' in fields:
+                            user_obj['id'] = user[0]
+                        if 'username' in fields:
+                            user_obj['username'] = user[1]
+                        if 'email' in fields:
+                            user_obj['email'] = user[3]
+                        if 'role' in fields:
+                            user_obj['role'] = user[4]
+                        if 'secretNotes' in fields:
+                            user_obj['secretNotes'] = user[6]
+                        users.append(user_obj)
+                    
+                    results[f'query{i}'] = users
+                    conn.close()
+        
+        return {"data": results}
+    
+    return None
 
 def execute_login_mutation(query):
     """Execute login mutation - vulnerable to SQL injection"""
@@ -286,7 +437,7 @@ def graphql():
         <!DOCTYPE html>
         <html>
         <head>
-            <title>GraphiQL</title>
+            <title>GraphQL Testing Interface</title>
             <style>
                 body { font-family: Arial, sans-serif; margin: 20px; }
                 .container { display: flex; height: 80vh; }
@@ -302,14 +453,15 @@ def graphql():
             <h1>GraphQL Testing Interface</h1>
             <div class="example">
                 <strong>Example Queries:</strong><br>
-                Query: { users { id username email role secretNotes } }<br>
-                Mutation: mutation { login(username: "admin", password: "admin123") { success token user { username role } } }<br>
-                Injection: { user(username: "admin' OR '1'='1'--") { id username role } }
+                Query: {users{id username email role secretNotes}}<br>
+                Nested: {users{id username orders(userId:1){id status product{id name category}}}}<br>
+                Mutation: mutation{login(username:"admin",password:"admin123"){success token user{username role}}}<br>
+                Injection: {user(username:"admin' OR '1'='1'--"){id username role}}
             </div>
             <div class="container">
                 <div class="query-section">
                     <h3>GraphQL Query</h3>
-                    <textarea id="query" placeholder="Enter your GraphQL query here...">{ users { id username email role } }</textarea>
+                    <textarea id="query" placeholder="Enter your GraphQL query here...">{users{id username email role}}</textarea>
                     <br><br>
                     <button onclick="executeQuery()">Execute Query</button>
                 </div>
@@ -351,15 +503,22 @@ def graphql():
         # Parse and execute GraphQL query
         query_type, parsed_query = parse_graphql_query(query)
         
+        # Check for batch queries first
+        batch_result = execute_batch_query(parsed_query)
+        if batch_result:
+            return jsonify(batch_result)
+        
         if query_type == 'mutation':
             if 'login' in parsed_query:
                 return jsonify(execute_login_mutation(parsed_query))
         else:
             # Handle queries
-            if 'user' in parsed_query:
+            if 'user' in parsed_query or 'users' in parsed_query:
                 return jsonify(execute_user_query(parsed_query, variables))
             elif 'products' in parsed_query:
                 return jsonify(execute_product_query(parsed_query))
+            elif 'orders{' in parsed_query:
+                return jsonify(execute_orders_query(parsed_query))
             elif 'introspectionEnabled' in parsed_query:
                 return jsonify({"data": {"introspectionEnabled": "GraphQL introspection is enabled - this should be disabled in production!"}})
         
