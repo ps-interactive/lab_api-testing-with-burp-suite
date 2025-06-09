@@ -195,7 +195,7 @@ def execute_user_query(query, variables=None):
             return {"errors": [{"message": str(e)}]}
     
     # Multiple users query
-    elif 'users{' in query:
+    elif 'users' in query and 'user(' not in query:
         # Extract limit if present
         limit = 10
         limit_match = re.search(r'limit:\s*(\d+)', query)
